@@ -146,7 +146,6 @@ void onPress(int val) {
   }
 }
 
-
 void spdCtrl() {
   if (spdCtrlTimer - spdCtrlTimeElapse >= accRate[(tractionMode + 7)] && tractionMode > 0) {
     spdCtrlTimeElapse = spdCtrlTimer;
@@ -168,6 +167,8 @@ void carrierCtrl() {
   if (sinFreq == 0) {
     triAmp = 0;
     pwmModeDisply = pwmMode[0];
+  } else if (digitalRead(R188Pin) == HIGH && sinFreq >= 67) {
+    triAmp = 0;
   } else if (sinFreq > 0) {
     triAmp = 1;
   }
@@ -255,7 +256,7 @@ void pwmCtrl() {
     } else if (sinFreq >= 60 && sinFreq < 67) { //W3
       sinAmp = map(sinFreq, 60, 67, 1.2, 1.3);
     } else if (sinFreq >= 67) {  //1
-      sinAmp = 4;
+      sinAmp = 1;
     }
   } else if (digitalRead(R160Pin) == HIGH) {
     //R160

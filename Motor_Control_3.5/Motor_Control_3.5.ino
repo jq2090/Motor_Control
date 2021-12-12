@@ -82,13 +82,13 @@ char *pwmMode[] = {"-", "Asynchronous", "Synchronous - 15 Pulses", "Synchronous 
 String pwmModeDisply = "";
 
 //IO
-int buttonSpdDn = 31; //speed down
-int buttonSpdUp = 32; //speed up
-int R160Pin = 33; //R160 train preset
-int R188Pin = 34; //R188 train preset
-int outPin0 = 35;
-int outPin1 = 19;
-int buttonPinEB = 26;
+int buttonSpdDn = 31;
+int buttonSpdUp = 32;
+int R160Pin = 33;
+int R188Pin = 34;
+int outPin0 = A21;
+int outPin1 = 36;
+int buttonPinEB = 37;
 
 //class
 TractionControl spdDn(buttonSpdDn, 0);
@@ -102,9 +102,10 @@ void setup() {
   pinMode(buttonPinEB, INPUT);
   pinMode(R160Pin, INPUT);
   pinMode(R188Pin, INPUT);
-  pinMode(outPin0, OUTPUT);
+  //pinMode(outPin0, OUTPUT);
   pinMode(outPin1, OUTPUT);
   attachInterrupt(digitalPinToInterrupt(buttonPinEB), ISR_EB, CHANGE);
+  analogWriteResolution(2);
 
   //object setup
   spdDn.pressHandler(onPress);
@@ -115,20 +116,18 @@ void setup() {
   sinTimer.begin(oscSin, 151);
   triTimer.begin(oscTri, 151);
   //debuggerTimer.begin(debugger, 50000);
-  statusTimer.begin(trainStatus, 50000);  //operator's screen
+  statusTimer.begin(trainStatus, 50000);
 }
 
 void loop() {
+  spdDn.process();
+  spdUp.process();
   intervalUpdator();
-  carrierCtrl();
-  pwmCtrl();
-  pwmOut();
 }
 
 void intervalUpdator() {
-  //calculate time between samples: sample rate / wave frequency
-  sampleRequiredSin = 48000 / sinFreq;
-  sampleRequiredTri = 48000 / triFreq;
+  sampleRequiredSin = 44100 / sinFreq;
+  sampleRequiredTri = 44100 / triFreq;
   sinInterval = ((1 / sinFreq) / sampleRequiredSin) * 1000000;
   triInterval = ((1 / triFreq) / sampleRequiredTri) * 1000000;
   sinTimer.update(sinInterval);
@@ -136,23 +135,23 @@ void intervalUpdator() {
 }
 
 void master() {
-  //traction control and speed controls
-  spdDn.process();
-  spdUp.process();
   spdCtrl();
+  carrierCtrl();
+  pwmCtrl();
+  pwmOut();
 }
 
 void onPress(int val) {
-  //switch between different acceleration modes if emergency brake is not triggered
   if (val == 1 && tractionMode < 4  && EB != true) {
     tractionMode ++;
+    delay(10);
   } else if (val == 0 && tractionMode > -7 && EB != true) {
     tractionMode --;
+    delay(10);
   }
 }
 
 void spdCtrl() {
-  //increase or decrease speed (sin frequency) based on different acceleration modes
   if (spdCtrlTimer - spdCtrlTimeElapse >= accRate[(tractionMode + 7)] && tractionMode > 0) {
     spdCtrlTimeElapse = spdCtrlTimer;
     sinFreq += 0.01;
@@ -170,22 +169,17 @@ void spdCtrl() {
 }
 
 void carrierCtrl() {
-  //set carrier amplitude
   if (sinFreq == 0) {
     triAmp = 0;
     pwmModeDisply = pwmMode[0];
-  } else if (digitalRead(R188Pin) == HIGH && sinFreq >= 60 && sinFreq < 67) {
-    triAmp = 0.7;
   } else if (digitalRead(R188Pin) == HIGH && sinFreq >= 67) {
-    triAmp = 0;
+    triAmp = 0.5;
   } else if (sinFreq > 0) {
     triAmp = 1;
   }
-  
-  //set carrier frequency
+
   if (digitalRead(R188Pin) == HIGH) {
-    //R188 train
-    //Asynchronous
+    //R188
     if (sinFreq > 0 && sinFreq < 1.5) {
       triFreq = 250;
       pwmModeDisply = pwmMode[1];
@@ -199,7 +193,6 @@ void carrierCtrl() {
     } else if (sinFreq >= 25 && sinFreq < 25.5 && tractionMode < 0) {
       triFreq = 500;
       pwmModeDisply = pwmMode[1];
-    //Synchronous
     } else if (sinFreq >= 25.5 && sinFreq < 35) {
       triFreq = sinFreq * 15;
       pwmModeDisply = pwmMode[2];
@@ -217,7 +210,7 @@ void carrierCtrl() {
       pwmModeDisply = pwmMode[6];
     }
   } else if (digitalRead(R160Pin) == HIGH) {
-    //R160 train (all asynchronous)
+    //R160
     if (sinFreq >= 0 and sinFreq<3.5 and tractionMode>0) {
       triFreq = 380;
       pwmModeDisply = pwmMode[1];
@@ -262,8 +255,8 @@ void carrierCtrl() {
 
 void pwmCtrl() {
   if (digitalRead(R188Pin) == HIGH) {
-    //R188 train
-    if (sinFreq == 0 or tractionMode == 0) {  //or tractionMode == 0
+    //R188
+    if (sinFreq == 0 ) {  //or tractionMode == 0
       sinAmp = 0;
     } else if (sinFreq > 0 && sinFreq < 1.5) {  //asyn
       sinAmp = 0.1;
@@ -283,7 +276,7 @@ void pwmCtrl() {
       sinAmp = 2;
     }
   } else if (digitalRead(R160Pin) == HIGH) {
-    //R160 train
+    //R160
     if (sinFreq == 0 or tractionMode == 0) {  //or tractionMode == 0
       sinAmp = 0;
     } else if (sinFreq >= 75) {
@@ -295,7 +288,6 @@ void pwmCtrl() {
 }
 
 void oscSin() {
-  //modulation wave
   sinVal = sinAmp * sinTable[map(sinTableIndex, 0, sampleRequiredSin, 0, 256)];
   sinTableIndex++;
   if (sinTableIndex >= int(sampleRequiredSin)) {
@@ -304,57 +296,54 @@ void oscSin() {
 }
 
 void oscTri() {
-  //carrier wave
   triVal = triAmp * triTable[map(triTableIndex, 0, sampleRequiredTri, 0, 256)];
   triTableIndex++;
-  if (triTableIndex >= int(sampleRequiredTri)) {
+  if (triTableIndex >= sampleRequiredTri) {
     triTableIndex = 0;
   }
 }
 
 void pwmOut() {
-  //when using interval timers, always make a copy of values been manipulated by the timer
-  volatile int sinValCopy = 0;
-  volatile int triValCopy = 0;
-  noInterrupts();
-  sinValCopy = sinVal;
-  triValCopy = triVal;
-  interrupts();
+  //Symmetric
+  //  double sinValCopy = 0;
+  //  double triValCopy = 0;
+  //  if (triVal == 0.5){
+  //    Serial.println("Hello!");
+  //  }
+  //noInterrupts();
+  //interrupts();
 
-  if (sinValCopy > triValCopy) {
+  if (sinVal > triVal && sinFreq != 0) { //&& sinTable[sinTableIndex] > 0
     P = 1;
-  } else if (sinValCopy <= triValCopy) {
+  } else {
     P = 0;
   }
 
-  if (-sinValCopy > triValCopy) {
+  if (-sinVal > triVal && sinFreq != 0) { //&& sinTable[sinTableIndex] < 0
     N = 1;
-  } else if (-sinValCopy <= triValCopy) {
+  } else {
     N = 0;
   }
 
   outVal0 = P - N;
   outVal1 = N - P;
 
-  if (outVal0 > 0) {
-    digitalWrite(outPin0, outVal0);
-  } else if (outVal0 <= 0) {
-    digitalWrite(outPin0, LOW);
-  }
+  analogWrite(outPin0, map(outVal0, -1, 1, 0, 4));
 
-  if (digitalRead(R188Pin) == HIGH && sinFreq >= 67) {
-    outVal1 = -outVal1;
-  }
-
-  if (outVal1 > 0) {
-    digitalWrite(outPin1, outVal1);
-  } else if (outVal1 <= 0) {
-    digitalWrite(outPin1, LOW);
-  }
+  //  if (outVal0 >= 0) {
+  //    digitalWrite(outPin0, outVal0);
+  //  } else {
+  //    digitalWrite(outPin0, LOW);
+  //  }
+  //
+  //  if (outVal1 >= 0) {
+  //    digitalWrite(outPin1, outVal1);
+  //  } else {
+  //    digitalWrite(outPin1, LOW);
+  //  }
 }
 
 void ISR_EB() {
-  //interrupt service routine for emergency brake
   EB = true;
   tractionMode = -7;
 }
